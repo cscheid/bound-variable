@@ -9,7 +9,7 @@ use std::io::Read;
 pub struct Machine {
     count: usize,
     registers: [u32; 8],
-    arrays: HashMap<u32, Vec<u32>>,
+    arrays: Vec<Vec<u32>>, // HashMap<u32, Vec<u32>>,
     array_list: Vec<u32>,
     execution_finger: usize,
     halted: bool
@@ -18,17 +18,19 @@ pub struct Machine {
 impl Machine {
 
     fn alloc(&mut self, n: u32) -> u32 {
-        let ix = if self.array_list.len() > 0 {
-            self.array_list.pop().unwrap()
+        if self.array_list.len() > 0 {
+            let ix = self.array_list.pop().unwrap();
+            self.arrays[ix as usize].append(&mut vec![0; n as usize]);
+            ix as u32
         } else {
-            self.arrays.len() as u32
-        };
-        self.arrays.insert(ix, vec![0; n as usize]);
-        ix as u32
+            let ix = self.arrays.len();
+            self.arrays.push(vec![0; n as usize]);
+            ix as u32
+        }
     }
 
     fn free(&mut self, a: u32) {
-        self.arrays.remove(&a);
+        self.arrays[a as usize].truncate(0);
         self.array_list.push(a);
     }
     pub fn run(&mut self) {
@@ -37,7 +39,8 @@ impl Machine {
         }
     }
     pub fn step(&mut self) {
-        let current_platter = self.arrays[&0][self.execution_finger];
+        self.count += 1;
+        let current_platter = self.arrays[0][self.execution_finger];
         self.execution_finger += 1;
         let current_operator = current_platter >> 28;
         let reg_c = (current_platter & 7) as usize;
@@ -50,15 +53,15 @@ impl Machine {
                 };
             },
             1  => {
-                self.registers[reg_a] = self.arrays[&self.registers[reg_b]][self.registers[reg_c] as usize];
+                let b = self.registers[reg_b] as usize;
+                let c = self.registers[reg_c] as usize;
+                self.registers[reg_a] = self.arrays[b][c];
             },
             2  => {
-                let a = self.registers[reg_a];
+                let a = self.registers[reg_a] as usize;
                 let b = self.registers[reg_b] as usize;
                 let c = self.registers[reg_c];
-                self.arrays
-                    .entry(a as u32)
-                    .and_modify(|e| e[b] = c);
+                self.arrays[a][b] = c;
             },
             3  => {
                 self.registers[reg_a] = self.registers[reg_b].wrapping_add(self.registers[reg_c]);
@@ -74,6 +77,7 @@ impl Machine {
             },
             7  => {
                 self.halted = true;
+                eprintln!("Halted after {:?} instructions", self.count);
             },
             8  => {
                 self.registers[reg_b] = self.alloc(self.registers[reg_c]);
@@ -82,7 +86,7 @@ impl Machine {
                 self.free(self.registers[reg_c]);
             },
             10 => {
-                let mut stdout = io::stderr();
+                let mut stdout = io::stdout();
                 {
                     let mut handle = stdout.lock();
                     let mut buffer = [0; 1];
@@ -104,13 +108,11 @@ impl Machine {
             12 => {
                 let v = self.registers[reg_b];
                 self.execution_finger = self.registers[reg_c] as usize;
+                let b = self.registers[reg_b] as usize;
                 if v != 0 {
-                    self.arrays.get(&self.registers[reg_b])
-                        .map(|a| a.clone())
-                        .map(|a| {
-                            self.arrays.remove(&0);
-                            self.arrays.insert(0, a);
-                        });
+                    self.arrays[0].truncate(0);
+                    let mut a = self.arrays[b].clone();
+                    self.arrays[0].append(&mut a);
                 }
             },
             13 => {
@@ -124,8 +126,8 @@ impl Machine {
 }
 
 pub fn init(program: Vec<u32>) -> Machine {
-    let mut arrays = HashMap::new();
-    arrays.insert(0, program);
+    let mut arrays = vec![program];
+    // arrays.insert(0, program);
     Machine {
         count: 0,
         registers: [0; 8],
